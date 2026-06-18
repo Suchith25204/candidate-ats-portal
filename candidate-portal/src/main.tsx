@@ -5,22 +5,22 @@ import App from './App.tsx';
 import { initDB } from '@/utils/mockDb';
 import './index.css';
 
-import { StytchProvider } from '@stytch/react';
-import { StytchUIClient } from '@stytch/vanilla-js';
+import { StytchB2BProvider } from '@stytch/react/b2b';
+import { StytchB2BUIClient } from '@stytch/vanilla-js/b2b';
 
 // Initialize the local database before rendering the app
 initDB();
 
 // Initialize Stytch Client
 // We use a fallback empty string to prevent crashing during build if env is missing
-const stytchClient = new StytchUIClient(import.meta.env.VITE_STYTCH_PUBLIC_TOKEN || '');
+const stytchClient = new StytchB2BUIClient(import.meta.env.VITE_STYTCH_PUBLIC_TOKEN || '');
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <StytchProvider stytch={stytchClient as any}>
+    <StytchB2BProvider stytch={stytchClient as any}>
       <BrowserRouter>
         <App />
       </BrowserRouter>
-    </StytchProvider>
+    </StytchB2BProvider>
   </React.StrictMode>,
 );

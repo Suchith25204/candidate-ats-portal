@@ -1,10 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { useStytch, useStytchUser } from '@stytch/react';
+import { useStytchB2BClient, useStytchMember } from '@stytch/react/b2b';
 import { useNavigate } from 'react-router-dom';
 import { APIService } from '../services/api';
-import StageCard from './StageCard';
-import RolePulse from './RolePulse';
-import AsyncQuestion from './AsyncQuestion';
 
 // ---------------------------------------------------------
 // COMPONENT: Profile Collection
@@ -36,7 +33,7 @@ function CandidateProfileForm({ onComplete }: { onComplete: (profile: any) => vo
             value={stream}
             onChange={(e) => setStream(e.target.value)}
             placeholder="e.g. Computer Science"
-            className="w-full p-3 border rounded focus:ring-2 focus:ring-blue-500 outline-none"
+            className="w-full p-3 border rounded focus:ring-2 focus:ring-blue-500 outline-none text-gray-900"
             required
           />
         </div>
@@ -47,7 +44,7 @@ function CandidateProfileForm({ onComplete }: { onComplete: (profile: any) => vo
             value={specialization}
             onChange={(e) => setSpecialization(e.target.value)}
             placeholder="e.g. Artificial Intelligence, Web Development"
-            className="w-full p-3 border rounded focus:ring-2 focus:ring-blue-500 outline-none"
+            className="w-full p-3 border rounded focus:ring-2 focus:ring-blue-500 outline-none text-gray-900"
             required
           />
         </div>
@@ -58,7 +55,7 @@ function CandidateProfileForm({ onComplete }: { onComplete: (profile: any) => vo
             value={interests}
             onChange={(e) => setInterests(e.target.value)}
             placeholder="e.g. React, Node.js, Machine Learning"
-            className="w-full p-3 border rounded focus:ring-2 focus:ring-blue-500 outline-none"
+            className="w-full p-3 border rounded focus:ring-2 focus:ring-blue-500 outline-none text-gray-900"
             required
           />
         </div>
@@ -71,30 +68,37 @@ function CandidateProfileForm({ onComplete }: { onComplete: (profile: any) => vo
 }
 
 // ---------------------------------------------------------
-// COMPONENT: The MCQ Test Interceptor
+// COMPONENT: The MCQ Test Interceptor (AcmeHire UI)
 // ---------------------------------------------------------
 function CandidateTestView({ onComplete, candidate }: { onComplete: () => void, candidate: any }) {
   const [profileCompleted, setProfileCompleted] = useState(candidate?.profileCompleted || false);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<number, string>>({});
-  const [questions, setQuestions] = useState<any[]>([]);
+  const [flaggedQuestions, setFlaggedQuestions] = useState<Set<number>>(new Set());
+  const [questions, setQuestions] = useState<any[]>(candidate?.uniqueQuestions || []);
   const [isLoading, setIsLoading] = useState(false);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
 
-  const [timeLeft, setTimeLeft] = useState(600);
+  const [timeLeft, setTimeLeft] = useState(1800); // 30 minutes
   const [testStarted, setTestStarted] = useState(false);
-  const [isReadyToStart, setIsReadyToStart] = useState(false);
+  const [isReadyToStart, setIsReadyToStart] = useState(!!(candidate?.uniqueQuestions && candidate.uniqueQuestions.length > 0));
   const [testFinished, setTestFinished] = useState(false);
 
-  // Fullscreen Anti-Cheat Listener
+  // Resume test generation if profile is complete but questions are missing (e.g., after a refresh)
+  useEffect(() => {
+    if (profileCompleted && questions.length === 0 && !isLoading && !isReadyToStart) {
+      setIsLoading(true);
+      fetchAIAssessment(candidate);
+    }
+  }, [profileCompleted]);
+
+  // Anti-Cheat (Fullscreen)
   useEffect(() => {
     const handleFullscreenChange = () => {
-      // If we exit fullscreen and the test is actively running (not already finished)
       if (!document.fullscreenElement && testStarted && !testFinished) {
         alert("WARNING: You exited fullscreen mode. Your test has been automatically submitted as an anti-cheat measure.");
         submitTest();
       }
     };
-
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
   }, [testStarted, testFinished, questions, selectedAnswers]);
@@ -104,24 +108,20 @@ function CandidateTestView({ onComplete, candidate }: { onComplete: () => void, 
 
     let score = 0;
     questions.forEach(q => {
-      if (selectedAnswers[q.id] === q.correctAnswer) {
-        score++;
-      }
+      if (selectedAnswers[q.id] === q.correctAnswer) score++;
     });
 
     const finalScore = questions.length > 0 ? Math.round((score / questions.length) * 100) : 0;
 
-    if (candidate?.id) {
-      await APIService.completeTest(candidate.id, selectedAnswers, finalScore);
+    if (candidate?.email) {
+      await APIService.completeTest(candidate.email, selectedAnswers, finalScore);
     }
 
     setTestFinished(true);
-    // Attempt to exit fullscreen cleanly if we are in it
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(err => console.error(err));
     }
-
-    alert(`Test submitted successfully! Your score: ${finalScore}%. Your recruiter has been notified.`);
+    alert('Test submitted successfully! You will be redirected.');
     onComplete();
   };
 
@@ -133,46 +133,32 @@ function CandidateTestView({ onComplete, candidate }: { onComplete: () => void, 
         setTimeLeft((prev) => prev - 1);
       }, 1000);
     } else if (timeLeft === 0 && testStarted) {
-      // Auto submit when timer reaches 0
       submitTest();
     }
     return () => clearInterval(timer);
-  }, [testStarted, timeLeft]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [testStarted, timeLeft]); 
 
   const handleProfileSubmit = async (profileData: any) => {
     setIsLoading(true);
     setProfileCompleted(true);
-
-    if (candidate?.id) {
-      await APIService.saveProfile(candidate.id, profileData);
+    if (candidate?.email) {
+      await APIService.saveProfile(candidate.email, profileData);
     }
-
-    const mergedCandidate = {
-      ...candidate,
-      stream: profileData.stream,
-      specialization: profileData.specialization,
-      interests: profileData.interests
-    };
-
+    const mergedCandidate = { ...candidate, ...profileData };
     await fetchAIAssessment(mergedCandidate);
   };
 
   const fetchAIAssessment = async (cand: any = candidate) => {
     try {
-      // Direct call to the backend service (Local Proxy or AWS later)
       const parsed = await APIService.generateQuestions(cand);
       setQuestions(parsed);
-      
-      if (cand?.id) {
-        await APIService.saveAIQuestions(cand.id, parsed);
+      if (cand?.email) {
+        await APIService.saveAIQuestions(cand.email, parsed);
       }
       setIsReadyToStart(true);
     } catch (err) {
       console.error("AI Generation Error:", err);
-      // Fallback
-      setQuestions([
-        { id: 1, text: "Error connecting to AI service. Please contact support.", options: ["OK", "Retry", "Cancel", "Help"], correctAnswer: "OK" }
-      ]);
+      setQuestions([{ id: 1, text: "Error connecting to AI service. Please contact support.", options: ["OK", "Retry"], correctAnswer: "OK" }]);
       setIsReadyToStart(true);
     } finally {
       setIsLoading(false);
@@ -183,23 +169,24 @@ function CandidateTestView({ onComplete, candidate }: { onComplete: () => void, 
     setSelectedAnswers(prev => ({ ...prev, [qId]: answer }));
   };
 
+  const toggleFlag = (qId: number) => {
+    setFlaggedQuestions(prev => {
+      const next = new Set(prev);
+      if (next.has(qId)) next.delete(qId);
+      else next.add(qId);
+      return next;
+    });
+  };
+
   if (!profileCompleted) {
     return <CandidateProfileForm onComplete={handleProfileSubmit} />;
   }
 
   if (isLoading) {
     return (
-      <div className="bg-white p-8 rounded-lg shadow-md border border-gray-200">
-        <h2 className="text-2xl font-bold text-gray-900 mb-4">Generating Personalized Assessment...</h2>
-        <div className="animate-pulse flex space-x-4">
-          <div className="flex-1 space-y-6 py-1">
-            <div className="h-2 bg-slate-200 rounded"></div>
-            <div className="space-y-3">
-              <div className="grid grid-cols-3 gap-4"><div className="h-2 bg-slate-200 rounded col-span-2"></div><div className="h-2 bg-slate-200 rounded col-span-1"></div></div>
-              <div className="h-2 bg-slate-200 rounded"></div>
-            </div>
-          </div>
-        </div>
+      <div className="bg-carbon p-8 rounded-xl shadow-2xl border border-gray-800 text-center animate-pulse">
+        <h2 className="text-xl font-bold text-gray-200 mb-4">Generating AcmeHire Assessment...</h2>
+        <div className="w-12 h-12 border-4 border-teal-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
       </div>
     );
   }
@@ -209,32 +196,29 @@ function CandidateTestView({ onComplete, candidate }: { onComplete: () => void, 
       await document.documentElement.requestFullscreen();
       setTestStarted(true);
     } catch (err) {
-      alert("Failed to enter fullscreen mode. Please ensure your browser allows fullscreen to take this assessment.");
+      alert("Failed to enter fullscreen mode. Please ensure your browser allows fullscreen.");
     }
   };
 
   if (isReadyToStart && !testStarted) {
     return (
-      <div className="bg-white p-8 rounded-lg shadow-md border border-gray-200 text-center">
-        <h2 className="text-2xl font-bold text-gray-900 mb-4">Assessment Ready</h2>
-        <p className="text-gray-600 mb-6 max-w-lg mx-auto">
-          Your personalized technical assessment has been generated. 
-          <br /><br />
-          <strong>ANTI-CHEAT WARNING:</strong> This test must be taken in Fullscreen mode. If you exit fullscreen, switch tabs, or press ESC during the test, your assessment will be <strong>automatically submitted</strong>.
+      <div className="bg-carbon p-10 rounded-xl shadow-2xl border border-gray-800 text-center max-w-2xl mx-auto">
+        <h2 className="text-3xl font-extrabold text-white mb-4">Assessment Ready</h2>
+        <p className="text-gray-400 mb-8 leading-relaxed">
+          Your secure test has been generated. This assessment utilizes anti-cheat protocols. 
+          You must remain in fullscreen mode for the duration.
         </p>
         <button 
           onClick={startFullscreenTest}
-          className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded transition-colors text-lg"
+          className="bg-gradient-to-r from-teal-500 to-blue-600 hover:from-teal-400 hover:to-blue-500 text-white font-bold py-4 px-10 rounded-lg transition-all transform hover:scale-105"
         >
-          Enter Fullscreen & Start Test
+          Begin Test
         </button>
       </div>
     );
   }
 
-  if (!testStarted || questions.length === 0) {
-    return null;
-  }
+  if (!testStarted || questions.length === 0) return null;
 
   const currentQ = questions[currentQuestionIndex];
   const formatTime = (seconds: number) => {
@@ -243,94 +227,152 @@ function CandidateTestView({ onComplete, candidate }: { onComplete: () => void, 
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
+  const attemptedCount = Object.keys(selectedAnswers).length;
+
   return (
-    <div className="bg-white rounded-lg shadow-md border border-gray-200 overflow-hidden">
-      {/* Header / Timer */}
-      <div className="bg-gray-50 border-b border-gray-200 p-4 flex justify-between items-center">
-        <div>
-          <span className="text-sm font-semibold text-gray-500 uppercase tracking-wider">Question {currentQuestionIndex + 1} of {questions.length}</span>
+    <div className="bg-carbon min-h-[85vh] flex flex-col rounded-xl shadow-2xl border border-gray-800 overflow-hidden font-sans">
+      {/* Top Header Bar */}
+      <div className="bg-obsidian border-b border-gray-800 px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
+        {/* Left: Section Dropdown */}
+        <div className="w-full md:w-1/4">
+          <select className="bg-carbon text-gray-200 border border-gray-700 rounded-md px-3 py-1.5 text-sm outline-none focus:ring-1 focus:ring-teal-500">
+            <option>Section 1: General Tech</option>
+          </select>
         </div>
-        <div className={`font-mono text-lg font-bold px-4 py-1 rounded ${timeLeft < 60 ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
-          ⏱ {formatTime(timeLeft)}
+
+        {/* Middle: Pagination Navigation */}
+        <div className="flex-1 flex flex-col items-center">
+          <div className="flex gap-1 overflow-x-auto max-w-full pb-2 scrollbar-hide">
+            {questions.map((q, idx) => {
+              const isAttempted = selectedAnswers[q.id] !== undefined;
+              const isFlagged = flaggedQuestions.has(q.id);
+              const isActive = idx === currentQuestionIndex;
+              return (
+                <button
+                  key={q.id}
+                  onClick={() => setCurrentQuestionIndex(idx)}
+                  className={`w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-md font-semibold text-sm transition-all ${
+                    isActive ? 'border-2 border-teal-500 bg-teal-500/10 text-teal-400' :
+                    isAttempted ? 'bg-blue-600 text-white' :
+                    isFlagged ? 'bg-purple-600/20 border border-purple-500 text-purple-400' :
+                    'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                  }`}
+                >
+                  {idx + 1}
+                </button>
+              );
+            })}
+          </div>
+          <div className="text-xs text-gray-500 mt-1 uppercase tracking-wider font-semibold">
+            Attempted: <span className="text-teal-400">{attemptedCount}</span> / {questions.length}
+          </div>
+        </div>
+
+        {/* Right: Timer & Finish */}
+        <div className="w-full md:w-1/4 flex justify-end items-center gap-4">
+          <div className="text-right">
+            <div className="text-xs text-gray-500 uppercase font-bold tracking-wider">Section Time</div>
+            <div className={`font-mono text-xl font-bold ${timeLeft < 300 ? 'text-red-400 animate-pulse' : 'text-gray-100'}`}>
+              {formatTime(timeLeft)}
+            </div>
+          </div>
+          <button
+            onClick={() => { if(window.confirm('Are you sure you want to finish the test?')) submitTest(); }}
+            className="bg-gray-800 hover:bg-red-600/80 hover:text-white text-gray-300 px-4 py-2 rounded-md font-semibold text-sm transition-colors border border-gray-700"
+          >
+            Finish Test
+          </button>
         </div>
       </div>
 
-      <div className="p-8 flex flex-col md:flex-row gap-8 min-h-[400px]">
-        {/* Left Side: Question */}
-        <div className="md:w-1/2 flex flex-col justify-center border-b md:border-b-0 md:border-r border-gray-100 pb-6 md:pb-0 md:pr-8">
-          <h2 className="text-2xl font-semibold text-gray-800 leading-relaxed">
-            {currentQ.text}
-          </h2>
+      {/* Two-Column Body Grid */}
+      <div className="flex-1 flex flex-col lg:flex-row">
+        {/* Left Panel: Content */}
+        <div className="lg:w-1/2 p-8 border-b lg:border-b-0 lg:border-r border-gray-800 relative">
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-teal-400 font-bold uppercase tracking-wider text-sm">Question {currentQuestionIndex + 1}</h3>
+            <label className="flex items-center gap-2 cursor-pointer group">
+              <input 
+                type="checkbox" 
+                checked={flaggedQuestions.has(currentQ.id)}
+                onChange={() => toggleFlag(currentQ.id)}
+                className="w-4 h-4 rounded bg-carbon border-gray-600 text-purple-500 focus:ring-purple-500/50"
+              />
+              <span className="text-gray-400 text-sm font-medium group-hover:text-purple-400 transition-colors">Revisit Later</span>
+            </label>
+          </div>
+          <div className="prose prose-invert max-w-none">
+            <p className="text-xl text-gray-100 leading-relaxed font-medium">
+              {currentQ.text}
+            </p>
+          </div>
         </div>
 
-        {/* Right Side: Options */}
-        <div className="md:w-1/2 flex flex-col justify-center">
-          <div className="space-y-3">
-            {currentQ.options.map((opt: string) => (
-              <label
-                key={opt}
-                onClick={() => handleSelect(currentQ.id, opt)}
-                className={`block w-full border p-4 rounded-xl cursor-pointer transition-all ${selectedAnswers[currentQ.id] === opt ? 'bg-blue-50 border-blue-400 ring-1 ring-blue-400' : 'bg-white border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}
-              >
-                {/* Changed to items-start so the bullet aligns with the top line of long text */}
-                <div className="flex items-start gap-3">
+        {/* Right Panel: Answering Area */}
+        <div className="lg:w-1/2 p-8 bg-obsidian">
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-gray-400 font-semibold uppercase tracking-wider text-sm">Select an option</h3>
+            <button 
+              onClick={() => {
+                const newAnswers = { ...selectedAnswers };
+                delete newAnswers[currentQ.id];
+                setSelectedAnswers(newAnswers);
+              }}
+              className="text-xs text-blue-400 hover:text-blue-300 hover:underline font-medium"
+            >
+              Clear Response
+            </button>
+          </div>
 
-                  {/* Added shrink-0 and mt-0.5 right here */}
-                  <div className={`shrink-0 mt-0.5 w-5 h-5 rounded-full border flex items-center justify-center ${selectedAnswers[currentQ.id] === opt ? 'border-blue-500' : 'border-gray-300'}`}>
-                    {selectedAnswers[currentQ.id] === opt && <div className="w-2.5 h-2.5 bg-blue-500 rounded-full"></div>}
+          <div className="space-y-4">
+            {currentQ.options.map((opt: string) => {
+              const isSelected = selectedAnswers[currentQ.id] === opt;
+              return (
+                <label
+                  key={opt}
+                  className={`flex items-start gap-4 p-5 rounded-xl cursor-pointer border transition-all ${
+                    isSelected 
+                      ? 'bg-blue-900/20 border-blue-500 ring-1 ring-blue-500' 
+                      : 'bg-carbon border-gray-800 hover:border-gray-600'
+                  }`}
+                >
+                  <div className={`mt-1 w-5 h-5 flex-shrink-0 rounded-full border-2 flex items-center justify-center transition-colors ${
+                    isSelected ? 'border-blue-400 bg-blue-400/20' : 'border-gray-500 bg-transparent'
+                  }`}>
+                    {isSelected && <div className="w-2.5 h-2.5 bg-blue-400 rounded-full"></div>}
                   </div>
-
-                  <span className="text-gray-700 font-medium leading-relaxed">{opt}</span>
-                </div>
-              </label>
-            ))}
+                  <span className={`text-base font-medium leading-relaxed ${isSelected ? 'text-gray-100' : 'text-gray-300'}`}>
+                    {opt}
+                  </span>
+                </label>
+              );
+            })}
           </div>
         </div>
       </div>
-      {/* Footer / Controls */}
-      <div className="bg-gray-50 border-t border-gray-200 p-4 flex justify-between items-center">
-        <button
-          type="button"
-          disabled={currentQuestionIndex === 0}
-          onClick={() => setCurrentQuestionIndex(prev => prev - 1)}
-          className="px-6 py-2 rounded font-medium text-gray-600 hover:bg-gray-200 disabled:opacity-50 transition-colors"
-        >
-          Previous
-        </button>
 
-        {currentQuestionIndex < questions.length - 1 ? (
-          <button
-            type="button"
-            onClick={() => setCurrentQuestionIndex(prev => prev + 1)}
-            className="px-6 py-2 rounded font-bold text-white bg-blue-600 hover:bg-blue-700 transition-colors"
-          >
-            Next Question
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={submitTest}
-            className="px-8 py-2 rounded font-bold text-white bg-green-600 hover:bg-green-700 transition-colors shadow-sm"
-          >
-            Submit Test
-          </button>
-        )}
+      {/* Footer Row */}
+      <div className="bg-obsidian border-t border-gray-800 p-4 px-8 flex justify-between items-center text-xs text-gray-500">
+        <div>
+          Need Help? Call <span className="font-semibold text-gray-300">1-800-ACME-HR</span>
+        </div>
+        <div>
+          AcmeHire Secure Assessment Platform v2.0
+        </div>
       </div>
     </div>
   );
 }
 
 export default function CandidateDashboard() {
-  const { user: stytchUser } = useStytchUser();
-  const stytch = useStytch();
   const navigate = useNavigate();
 
   const [candidate, setCandidate] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   const fetchCandidate = async () => {
-    if (stytchUser && stytchUser.emails && stytchUser.emails.length > 0) {
-      const email = stytchUser.emails[0].email;
+    const email = localStorage.getItem('candidateEmail');
+    if (email) {
       const dbCandidate = await APIService.getCandidateByEmail(email);
       setCandidate(dbCandidate);
     }
@@ -339,17 +381,17 @@ export default function CandidateDashboard() {
 
   useEffect(() => {
     fetchCandidate();
-  }, [stytchUser]);
+  }, []);
 
   if (loading) {
-    return <div className='p-8 text-center animate-pulse'>Loading dashboard...</div>;
+    return <div className='p-8 text-center animate-pulse text-gray-400'>Loading dashboard...</div>;
   }
 
-  if (!stytchUser || !candidate) {
+  if (!candidate) {
     return (
-      <div className='min-h-screen bg-blue-50/30 flex flex-col items-center justify-center p-6 text-center'>
-        <h2 className='text-2xl font-bold text-red-600 mb-4'>Access Denied</h2>
-        <p className='text-gray-700'>You do not have permission to view this dashboard.</p>
+      <div className='min-h-screen bg-obsidian flex flex-col items-center justify-center p-6 text-center font-sans'>
+        <h2 className='text-3xl font-extrabold text-red-500 mb-4'>Access Denied</h2>
+        <p className='text-gray-300 text-lg'>You do not have permission to view this dashboard.</p>
         <p className='text-gray-500 mt-2'>Please use the secure link sent to your email by your recruiter.</p>
       </div>
     );
@@ -360,49 +402,74 @@ export default function CandidateDashboard() {
   };
 
   return (
-    <div className='min-h-screen bg-blue-50/30 p-6'>
-      <button onClick={() => navigate('/')} className='text-blue-600 hover:underline mb-6 font-medium'>
-        &larr; Back to Home
-      </button>
+    <div className='min-h-screen bg-obsidian text-gray-100 p-6 font-sans selection:bg-teal-500/30'>
+      <div className='max-w-5xl mx-auto'>
+        <button onClick={() => navigate('/')} className='text-teal-400 hover:text-teal-300 hover:underline mb-8 font-semibold flex items-center gap-2 transition-colors'>
+          &larr; Back to Home
+        </button>
 
-      <div className='max-w-4xl mx-auto animate-fade-in'>
-        <div className='flex justify-between items-start mb-8'>
+        <div className='flex justify-between items-start mb-10'>
           <div>
-            <h1 className='text-3xl font-extrabold text-gray-900'>Hiring Portal</h1>
-            <p className='text-gray-500 mt-2'>Welcome back, <span className='font-semibold'>{candidate.name}</span>.</p>
+            <h1 className='text-4xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-teal-400 to-blue-500 tracking-tight'>
+              AcmeHire Portal
+            </h1>
+            <p className='text-gray-400 mt-2 text-lg'>Welcome back, <span className='text-gray-200 font-semibold'>{candidate.name}</span></p>
           </div>
-          <button onClick={() => { stytch.session.revoke(); navigate('/'); }} className='text-sm bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded transition-colors shadow-sm'>
+          <button onClick={() => { localStorage.removeItem('candidateEmail'); navigate('/'); }} className='text-sm bg-carbon border border-gray-700 hover:bg-gray-800 text-gray-300 px-5 py-2.5 rounded-lg transition-colors shadow-lg font-medium'>
             Sign Out
           </button>
         </div>
 
         {candidate.stage === 'Test Sent' && !candidate.testCompleted ? (
            <CandidateTestView onComplete={handleTestComplete} candidate={candidate} />
-        ) : candidate.stage === 'Applied' ? (
-          <div className='animate-fade-in max-w-3xl'>
-            <div className='bg-white p-8 rounded-lg shadow-md border border-gray-200'>
-              <div className='flex items-center gap-3 mb-4'>
-                <div className='w-3 h-3 bg-yellow-400 rounded-full animate-pulse'></div>
-                <h2 className='text-xl font-bold text-gray-800'>Application Received</h2>
-              </div>
-              <div className='bg-blue-50 border border-blue-200 rounded p-4 mb-4'>
-                <p className='text-blue-800 font-medium'>Status: <span className='font-bold'>Applied</span></p>
-                <p className='text-blue-700 text-sm mt-1'>
-                  Waiting for Recruiter action for <strong>{candidate.nextRoundDays || 0} day(s)</strong>.
-                </p>
-              </div>
-              <div className='text-sm text-gray-500 space-y-1'>
-                <p><strong>Role:</strong> {candidate.role}</p>
-                <p><strong>Email:</strong> {candidate.email}</p>
-              </div>
-              <p className='text-gray-400 text-xs mt-6'>You will receive an email when your recruiter schedules your assessment.</p>
-            </div>
-          </div>
         ) : (
-          <div className='animate-fade-in max-w-3xl'>
-            <StageCard candidateId={candidate.id} />
-            <RolePulse candidateId={candidate.id} />
-            <AsyncQuestion candidateId={candidate.id} />
+          <div className='animate-fade-in max-w-3xl mx-auto mt-12'>
+            <div className='bg-carbon p-10 rounded-2xl shadow-2xl border border-gray-800 relative overflow-hidden'>
+              
+              {/* Decorative Gradient Background */}
+              <div className='absolute top-0 right-0 -mr-20 -mt-20 w-64 h-64 bg-teal-500/10 rounded-full blur-3xl'></div>
+              <div className='absolute bottom-0 left-0 -ml-20 -mb-20 w-64 h-64 bg-purple-500/10 rounded-full blur-3xl'></div>
+
+              <div className='relative z-10'>
+                <div className='flex items-center gap-4 mb-6'>
+                  <div className={`w-4 h-4 rounded-full animate-pulse shadow-lg ${
+                    candidate.stage === 'Test Completed' ? 'bg-teal-400 shadow-teal-400/50' :
+                    candidate.stage === 'Interview Scheduled' ? 'bg-purple-400 shadow-purple-400/50' :
+                    candidate.stage === 'Offer Extended' ? 'bg-blue-400 shadow-blue-400/50' :
+                    candidate.stage === 'Hired' ? 'bg-green-400 shadow-green-400/50' :
+                    'bg-yellow-400 shadow-yellow-400/50'
+                  }`}></div>
+                  <h2 className='text-2xl font-bold text-white'>
+                    {candidate.stage === 'Applied' ? 'Application Received' : candidate.stage}
+                  </h2>
+                </div>
+                
+                <div className='bg-gray-900/50 border border-gray-700/50 rounded-xl p-6 mb-8 backdrop-blur-sm'>
+                  <p className='text-gray-300 text-lg'>
+                    Current Pipeline Stage: <span className='font-bold text-white'>{candidate.stage}</span>
+                  </p>
+                  <p className='text-gray-400 mt-2'>
+                    Time in current phase: <strong className='text-teal-400'>{candidate.nextRoundDays || 0} day(s)</strong>
+                  </p>
+                </div>
+
+                <div className='text-sm text-gray-500 space-y-2 mb-8'>
+                  <p><strong className='text-gray-400'>Target Role:</strong> {candidate.role}</p>
+                  <p><strong className='text-gray-400'>Contact Email:</strong> {candidate.email}</p>
+                </div>
+                
+                {candidate.testCompleted && (
+                  <div className='bg-teal-500/10 border border-teal-500/20 rounded-lg p-4 inline-flex items-center gap-3'>
+                    <svg className="w-5 h-5 text-teal-400" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"></path></svg>
+                    <span className='text-teal-400 font-medium'>Your assessment was submitted successfully. Pending recruiter review.</span>
+                  </div>
+                )}
+                
+                {!candidate.testCompleted && candidate.stage === 'Applied' && (
+                  <p className='text-gray-500 text-sm'>You will receive an email when your recruiter schedules your assessment.</p>
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>

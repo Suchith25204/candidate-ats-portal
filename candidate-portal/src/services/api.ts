@@ -1,135 +1,158 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import * as mockDb from '../utils/mockDb';
 
-// This switch is controlled by the .env file (VITE_USE_MOCK_BACKEND=true/false)
-const USE_MOCK = import.meta.env.VITE_USE_MOCK_BACKEND === 'true';
+const API_BASE_URL = 'http://localhost:3001/api';
 
 export const APIService = {
 
   // 1. Fetch all candidates
   getAllCandidates: async () => {
-    if (USE_MOCK) {
-      console.log("📡 [MOCK] Fetching candidates from localStorage");
-      return mockDb.getCandidates();
-    } else {
-      console.log("☁️ [AWS] Fetching candidates from AppSync/DynamoDB");
-      // FUTURE AWS CODE:
-      // const client = generateClient();
-      // const res = await client.graphql({ query: listCandidatesQuery });
-      // return res.data.listCandidates.items;
+    try {
+      const res = await fetch(`${API_BASE_URL}/candidates`);
+      if (!res.ok) throw new Error('Failed to fetch candidates');
+      return await res.json();
+    } catch (err) {
+      console.error(err);
       return [];
     }
   },
 
   getCandidateByEmail: async (email: string) => {
-    if (USE_MOCK) {
-      console.log(`📡 [MOCK] Fetching candidate by email: ${email}`);
-      return mockDb.getCandidateByEmail(email);
-    } else {
-      console.log(`☁️ [AWS] Fetching candidate by email from DynamoDB`);
-      // FUTURE AWS CODE
+    try {
+      const res = await fetch(`${API_BASE_URL}/candidates/${encodeURIComponent(email)}`);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (err) {
+      console.error(err);
+      return null;
     }
   },
 
   // 1b. Add a new candidate from the self-serve application form
   addCandidateFromApplication: async (candidate: { name: string; email: string; role: string; aboutYourself?: string }) => {
-    if (USE_MOCK) {
-      console.log(`📡 [MOCK] Adding candidate from application: ${candidate.email}`);
-      return mockDb.addCandidateFromApplication(candidate);
-    } else {
-      console.log(`☁️ [AWS] Creating candidate in DynamoDB`);
-      // FUTURE AWS CODE
+    try {
+      const res = await fetch(`${API_BASE_URL}/candidates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...candidate,
+          stage: 'Applied',
+          testCompleted: false,
+          testEnabled: false
+        })
+      });
+      if (!res.ok) throw new Error('Failed to create candidate');
+      return await res.json();
+    } catch (err) {
+      console.error(err);
+      throw err;
     }
   },
 
   // 2. Update a candidate's stage (Kanban Drag & Drop)
-  updateCandidateStage: async (id: string, newStage: string) => {
-    if (USE_MOCK) {
-      console.log(`📡 [MOCK] Updating candidate ${id} to ${newStage}`);
-      return mockDb.updateCandidate(id, { stage: newStage });
-    } else {
-      console.log(`☁️ [AWS] Mutating candidate ${id} in DynamoDB`);
-      // FUTURE AWS CODE
+  updateCandidateStage: async (email: string, newStage: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/candidates/${encodeURIComponent(email)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage: newStage })
+      });
+      return await res.json();
+    } catch (err) {
+      console.error(err);
     }
   },
 
   // 2b. Update candidate status (Alias for invite workflow)
-  updateCandidateStatus: async (id: string, stage: string) => {
-    return APIService.updateCandidateStage(id, stage);
+  updateCandidateStatus: async (email: string, stage: string) => {
+    return APIService.updateCandidateStage(email, stage);
   },
 
   // 3. Toggle the MCQ test status for a candidate
-  updateCandidateTestStatus: async (id: string, testEnabled: boolean) => {
-    if (USE_MOCK) {
-      console.log(`📡 [MOCK] Updating candidate ${id} test status: ${testEnabled}`);
-      return mockDb.updateCandidate(id, { testEnabled });
-    } else {
-      console.log(`☁️ [AWS] Mutating candidate ${id} test status in DynamoDB`);
-      // FUTURE AWS CODE
+  updateCandidateTestStatus: async (email: string, testEnabled: boolean) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/candidates/${encodeURIComponent(email)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ testEnabled })
+      });
+      return await res.json();
+    } catch (err) {
+      console.error(err);
     }
   },
 
   // 4. Save unique AI-generated questions to the candidate's profile
-  saveAIQuestions: async (id: string, questions: any[]) => {
-    if (USE_MOCK) {
-      console.log(`📡 [MOCK] Saving AI questions for candidate ${id}`);
-      return mockDb.updateCandidate(id, { uniqueQuestions: questions, hasPendingTest: true });
-    } else {
-      console.log(`☁️ [AWS] Saving AI questions to DynamoDB`);
-      // FUTURE AWS CODE
+  saveAIQuestions: async (email: string, questions: any[]) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/candidates/${encodeURIComponent(email)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uniqueQuestions: questions, hasPendingTest: true })
+      });
+      return await res.json();
+    } catch (err) {
+      console.error(err);
     }
   },
 
   // 5. Mark a candidate's test as completed with score
-  completeTest: async (id: string, answers: Record<number, string>, score: number) => {
-    if (USE_MOCK) {
-      console.log(`📡 [MOCK] Marking test completed for candidate ${id} — score: ${score}`);
-      return mockDb.updateCandidate(id, {
-        testCompleted: true,
-        testEnabled: false,
-        hasPendingTest: false,
-        testAnswers: answers,
-        testScore: score
+  completeTest: async (email: string, answers: Record<number, string>, score: number) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/candidates/${encodeURIComponent(email)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          stage: 'Test Completed',
+          testCompleted: true,
+          testEnabled: false,
+          hasPendingTest: false,
+          testAnswers: answers,
+          testScore: score
+        })
       });
-    } else {
-      console.log(`☁️ [AWS] Marking test completed in DynamoDB`);
-      // FUTURE AWS CODE
+      return await res.json();
+    } catch (err) {
+      console.error(err);
     }
   },
 
   // 6. Save candidate profile (specialization, stream, interests)
-  saveProfile: async (id: string, profile: { specialization: string; stream: string; interests: string[] }) => {
-    if (USE_MOCK) {
-      console.log(`📡 [MOCK] Saving profile for candidate ${id}`);
-      return mockDb.updateCandidate(id, {
-        specialization: profile.specialization,
-        stream: profile.stream,
-        interests: profile.interests,
-        profileCompleted: true
+  saveProfile: async (email: string, profile: { specialization: string; stream: string; interests: string[] }) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/candidates/${encodeURIComponent(email)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          specialization: profile.specialization,
+          stream: profile.stream,
+          interests: profile.interests,
+          profileCompleted: true
+        })
       });
-    } else {
-      console.log(`☁️ [AWS] Saving profile to DynamoDB`);
-      // FUTURE AWS CODE
+      return await res.json();
+    } catch (err) {
+      console.error(err);
     }
   },
 
   // 7. Update number of days expected for next round
-  updateNextRoundDays: async (id: string, days: number) => {
-    if (USE_MOCK) {
-      console.log(`📡 [MOCK] Updating next round days for candidate ${id} to ${days}`);
-      return mockDb.updateCandidate(id, { nextRoundDays: days });
-    } else {
-      console.log(`☁️ [AWS] Mutating candidate ${id} next round days in DynamoDB`);
-      // FUTURE AWS CODE
+  updateNextRoundDays: async (email: string, days: number) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/candidates/${encodeURIComponent(email)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nextRoundDays: days })
+      });
+      return await res.json();
+    } catch (err) {
+      console.error(err);
     }
   },
 
-  // 8. Abstracted AI Generation call (routes to proxy instead of Groq directly)
+  // 8. Abstracted AI Generation call
   generateQuestions: async (candidate: any) => {
-    if (USE_MOCK) {
-      console.log(`📡 [MOCK] Generating questions via local proxy server`);
-      // Calling our local express server running on port 3001
-      const res = await fetch('http://localhost:3001/api/generate-questions', {
+    try {
+      const res = await fetch(`${API_BASE_URL}/generate-questions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -138,14 +161,14 @@ export const APIService = {
       });
       
       if (!res.ok) {
-        throw new Error('Failed to generate questions via proxy');
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to generate questions via proxy');
       }
       
       return await res.json();
-    } else {
-      console.log(`☁️ [AWS] Generating questions via AppSync/Lambda`);
-      // FUTURE AWS CODE: Call AppSync/API Gateway
-      return [];
+    } catch (err: any) {
+      console.error(err);
+      throw err; // Throw instead of silently returning []
     }
   }
 };

@@ -1,13 +1,12 @@
 import { useState } from 'react';
-import { useStytchUser } from '@stytch/react';
+import { useStytchMember } from '@stytch/react/b2b';
 import { useNavigate } from 'react-router-dom';
 import { APIService } from '../services/api';
 
 export default function CandidateApplication() {
-  const { user: stytchUser } = useStytchUser();
   const navigate = useNavigate();
 
-  const verifiedEmail = stytchUser?.emails?.[0]?.email || '';
+  const verifiedEmail = localStorage.getItem('candidateEmail') || '';
 
   const [name, setName] = useState('');
   const [role, setRole] = useState('');
@@ -65,7 +64,7 @@ export default function CandidateApplication() {
               value={name}
               onChange={e => setName(e.target.value)}
               placeholder="e.g. Alex Johnson"
-              className="w-full p-3 border rounded focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-full p-3 border rounded focus:ring-2 focus:ring-blue-500 outline-none text-gray-900"
               required
             />
           </div>
@@ -78,7 +77,7 @@ export default function CandidateApplication() {
               value={role}
               onChange={e => setRole(e.target.value)}
               placeholder="e.g. Senior React Developer"
-              className="w-full p-3 border rounded focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-full p-3 border rounded focus:ring-2 focus:ring-blue-500 outline-none text-gray-900"
               required
             />
           </div>
@@ -91,7 +90,7 @@ export default function CandidateApplication() {
               onChange={e => setAboutYourself(e.target.value)}
               placeholder="Describe your experience, skills, and what excites you about this role..."
               rows={4}
-              className="w-full p-3 border rounded focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+              className="w-full p-3 border rounded focus:ring-2 focus:ring-blue-500 outline-none resize-none text-gray-900"
             />
           </div>
 

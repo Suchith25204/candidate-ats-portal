@@ -1,10 +1,10 @@
 import { useEffect, useRef } from 'react';
-import { useStytch } from '@stytch/react';
+import { useStytchB2BClient } from '@stytch/react/b2b';
 import { useNavigate } from 'react-router-dom';
 import { APIService } from '../services/api';
 
 export default function Authenticate() {
-  const stytch = useStytch();
+  const stytch = useStytchB2BClient();
   const navigate = useNavigate();
   const hasAttemptedAuth = useRef(false);
 
@@ -15,13 +15,15 @@ export default function Authenticate() {
     const token = new URLSearchParams(window.location.search).get('token');
     const tokenType = new URLSearchParams(window.location.search).get('stytch_token_type');
 
-    if (token && tokenType === 'magic_links') {
+    if (token && tokenType === 'discovery') {
       hasAttemptedAuth.current = true;
 
-      stytch.magicLinks.authenticate(token, { session_duration_minutes: 60 })
+      stytch.magicLinks.discovery.authenticate({ discovery_magic_links_token: token })
         .then(async (response) => {
-          // Get the authenticated user's email from the Stytch response
-          const email = response?.user?.emails?.[0]?.email;
+          // Get the authenticated user's email from the Stytch B2B response
+          // Note: In B2B Discovery, it usually returns an intermediate_session_token and discovered_organizations.
+          // For simplicity, we can get the email address from the email_address field.
+          const email = response?.email_address;
 
           if (email) {
             // Check if this candidate already exists in the database
