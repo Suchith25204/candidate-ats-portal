@@ -2,11 +2,11 @@ const { DynamoDBClient, CreateTableCommand, ResourceInUseException } = require('
 const { DynamoDBDocumentClient, PutCommand } = require('@aws-sdk/lib-dynamodb');
 
 const ddbClient = new DynamoDBClient({
-  endpoint: 'http://localhost:8000',
-  region: 'local',
+  endpoint: 'http://localhost:4566',
+  region: 'us-east-1',
   credentials: {
-    accessKeyId: 'fake',
-    secretAccessKey: 'fake'
+    accessKeyId: 'test',
+    secretAccessKey: 'test'
   }
 });
 

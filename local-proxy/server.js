@@ -21,11 +21,11 @@ const stytchClient = new stytch.B2BClient({
 
 // 2. DynamoDB Local Connection
 const ddbClient = new DynamoDBClient({
-  endpoint: 'http://localhost:8000',
-  region: 'local',
+  endpoint: 'http://localhost:4566',
+  region: 'us-east-1',
   credentials: {
-    accessKeyId: 'fake',
-    secretAccessKey: 'fake'
+    accessKeyId: 'test',
+    secretAccessKey: 'test'
   }
 });
 
