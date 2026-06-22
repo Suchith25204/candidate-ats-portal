@@ -46,7 +46,24 @@ const initializeDynamoDB = async () => {
     if (error instanceof ResourceInUseException || error.name === 'ResourceInUseException') {
       console.log("DynamoDB Table 'Candidates' already exists.");
     } else {
-      console.error("Error creating table:", error);
+      console.error("Error creating table Candidates:", error);
+    }
+  }
+
+  try {
+    const rolesParams = {
+      TableName: 'Roles',
+      AttributeDefinitions: [{ AttributeName: 'id', AttributeType: 'S' }],
+      KeySchema: [{ AttributeName: 'id', KeyType: 'HASH' }],
+      ProvisionedThroughput: { ReadCapacityUnits: 5, WriteCapacityUnits: 5 },
+    };
+    await ddbClient.send(new CreateTableCommand(rolesParams));
+    console.log("DynamoDB Table 'Roles' created.");
+  } catch (error) {
+    if (error instanceof ResourceInUseException || error.name === 'ResourceInUseException') {
+      console.log("DynamoDB Table 'Roles' already exists.");
+    } else {
+      console.error("Error creating table Roles:", error);
     }
   }
 };
@@ -78,21 +95,7 @@ app.post('/api/b2b/send-otp', async (req, res) => {
   }
 });
 
-app.post('/api/b2b/send-magic-link', async (req, res) => {
-  try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ error: 'Email is required' });
-
-    const response = await stytchClient.magicLinks.email.discovery.send({
-      email_address: email,
-      discovery_redirect_url: 'http://localhost:5173/authenticate'
-    });
-    res.json(response);
-  } catch (err) {
-    console.error('Stytch Send Magic Link Error:', err);
-    res.status(500).json({ error: err.error_message || err.message || 'Failed to send Magic Link' });
-  }
-});
+// Stytch Magic Link endpoint removed
 
 app.post('/api/b2b/authenticate', async (req, res) => {
   try {
@@ -140,6 +143,17 @@ app.get('/api/candidates/:email', async (req, res) => {
   }
 });
 
+// GET all recruiters
+app.get('/api/recruiters', async (req, res) => {
+  try {
+    const data = await docClient.send(new ScanCommand({ TableName: 'Recruiters' }));
+    res.json(data.Items || []);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch recruiters' });
+  }
+});
+
 // GET recruiter by email
 app.get('/api/recruiters/:email', async (req, res) => {
   try {
@@ -161,17 +175,17 @@ app.get('/api/recruiters/:email', async (req, res) => {
 // POST add new recruiter (Protected)
 app.post('/api/recruiters/add', async (req, res) => {
   try {
-    const { email, requesterEmail } = req.body;
+    const { email, requesterEmail, role = 'Recruiter' } = req.body;
     if (!email || !requesterEmail) return res.status(400).json({ error: 'email and requesterEmail are required' });
 
-    // Security check: Verify the requester is actually a recruiter
+    // Security check: Verify the requester is actually an Admin recruiter
     const checkRes = await docClient.send(new GetCommand({
       TableName: 'Recruiters',
       Key: { username: requesterEmail }
     }));
     
-    if (!checkRes.Item) {
-      return res.status(403).json({ error: 'Unauthorized: Requester is not an authenticated recruiter' });
+    if (!checkRes.Item || checkRes.Item.role !== 'Admin') {
+      return res.status(403).json({ error: 'Unauthorized: Only Admins can add new recruiters' });
     }
 
     // Insert new recruiter
@@ -179,12 +193,12 @@ app.post('/api/recruiters/add', async (req, res) => {
       TableName: 'Recruiters',
       Item: {
         username: email,
-        role: 'Recruiter',
+        role: role,
         createdAt: new Date().toISOString()
       }
     }));
     
-    res.json({ success: true, email });
+    res.json({ success: true, email, role });
   } catch (err) {
     console.error('Add Recruiter Error:', err);
     res.status(500).json({ error: 'Failed to add recruiter' });
@@ -231,6 +245,37 @@ app.put('/api/candidates/:email', async (req, res) => {
   }
 });
 
+// GET all roles
+app.get('/api/roles', async (req, res) => {
+  try {
+    const data = await docClient.send(new ScanCommand({ TableName: 'Roles' }));
+    res.json(data.Items || []);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch roles' });
+  }
+});
+
+// POST create role
+app.post('/api/roles', async (req, res) => {
+  try {
+    const role = req.body;
+    if (!role.id || !role.title) return res.status(400).json({ error: 'Role id and title are required' });
+
+    await docClient.send(new PutCommand({
+      TableName: 'Roles',
+      Item: {
+        ...role,
+        createdAt: new Date().toISOString()
+      }
+    }));
+    res.json(role);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create role' });
+  }
+});
+
 // 5. Existing AI Questions Endpoint
 const generatedCandidates = new Set();
 app.post('/api/generate-questions', apiLimiter, async (req, res) => {
@@ -251,13 +296,10 @@ app.post('/api/generate-questions', apiLimiter, async (req, res) => {
     }
 
     const cleanRole = xss(candidate?.role || 'Software Engineer').slice(0, 100);
-    const cleanStream = xss(candidate?.stream || 'Computer Science').slice(0, 100);
-    const cleanSpecialization = xss(candidate?.specialization || 'Software Engineering').slice(0, 100);
-    const rawInterests = Array.isArray(candidate?.interests) ? candidate.interests.join(', ') : 'programming';
-    const cleanInterests = xss(rawInterests).slice(0, 200);
+    const cleanAbout = xss(candidate?.aboutYourself || 'General Software Engineering experience.').slice(0, 500);
 
-    const promptContext = `The candidate is applying for the role of STRICTLY "${cleanRole}". Their stream is ${cleanStream}, specialization is ${cleanSpecialization}, and interests are ${cleanInterests}.`;
-    const promptContent = `Generate 10 UNIQUE, HIGH-DIFFICULTY multiple choice questions for a senior technical assessment. ${promptContext} The questions MUST strictly relate to the job role. DO NOT repeat any questions or use basic/entry-level concepts. Return ONLY a valid JSON array of objects, where each object has "id" (number starting from 1), "text" (the question string), "options" (array of exactly 4 answer strings), and "correctAnswer" (the exact string of the correct option). No markdown code fences, no extra text.`;
+    const promptContext = `The candidate is applying for the role of STRICTLY "${cleanRole}". They described their experience and interests as: "${cleanAbout}".`;
+    const promptContent = `Generate an assessment containing 10 multiple choice questions AND 1 Data Structures and Algorithms (DSA) coding question. ${promptContext} The questions MUST strictly relate to the job role. Return ONLY a valid JSON object with two keys: "mcqs" (an array of objects, each with "id", "text", "options" array of 4 strings, and "correctAnswer") and "coding" (an object with "title", "description", "inputFormat", "example" which is an object containing "input", "output", and "explanation", and "constraints"). No markdown code fences, no extra text.`;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',

@@ -21,11 +21,12 @@ export default function Authenticate() {
       stytch.magicLinks.discovery.authenticate({ discovery_magic_links_token: token })
         .then(async (response) => {
           // Get the authenticated user's email from the Stytch B2B response
-          // Note: In B2B Discovery, it usually returns an intermediate_session_token and discovered_organizations.
-          // For simplicity, we can get the email address from the email_address field.
-          const email = response?.email_address;
+          const email = response?.email_address || response?.member?.email_address;
 
           if (email) {
+            // Set the local session state
+            localStorage.setItem('candidateEmail', email);
+
             // Check if this candidate already exists in the database
             const existingCandidate = await APIService.getCandidateByEmail(email);
 
@@ -51,10 +52,12 @@ export default function Authenticate() {
   }, [stytch, navigate]);
 
   return (
-    <div className="min-h-screen bg-blue-50/30 flex items-center justify-center p-6">
-      <div className="bg-white p-8 rounded-lg shadow-md border border-gray-200 text-center max-w-sm w-full animate-pulse">
-        <h2 className="text-xl font-bold text-gray-800 mb-2">Authenticating...</h2>
-        <p className="text-gray-500">Verifying your secure link.</p>
+    <div className="min-h-screen bg-obsidian flex items-center justify-center p-6 font-sans">
+      <div className="bg-carbon p-8 rounded-xl shadow-2xl border border-gray-800 text-center max-w-sm w-full animate-pulse relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-teal-500/10 rounded-full blur-2xl"></div>
+        <h2 className="text-2xl font-bold text-gray-100 mb-2 relative z-10">Authenticating...</h2>
+        <p className="text-gray-400 relative z-10">Verifying your secure link.</p>
+        <div className="mt-6 w-8 h-8 border-4 border-teal-500 border-t-transparent rounded-full animate-spin mx-auto relative z-10"></div>
       </div>
     </div>
   );

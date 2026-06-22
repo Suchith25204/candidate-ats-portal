@@ -56,6 +56,7 @@ export default function CandidateLogin() {
 
       if (existingRecruiter) {
         localStorage.setItem('recruiterEmail', email);
+        localStorage.setItem('recruiterRole', existingRecruiter.role || 'Recruiter');
         navigate('/recruiter-dashboard');
         return;
       }

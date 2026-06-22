@@ -170,5 +170,76 @@ export const APIService = {
       console.error(err);
       throw err; // Throw instead of silently returning []
     }
+  },
+
+  // 9. Fetch all roles
+  getRoles: async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/roles`);
+      if (!res.ok) throw new Error('Failed to fetch roles');
+      return await res.json();
+    } catch (err) {
+      console.error(err);
+      return [];
+    }
+  },
+
+  // 10. Create a new role
+  createRole: async (roleData: { id: string; title: string; lastDate: string }) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/roles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(roleData)
+      });
+      if (!res.ok) throw new Error('Failed to create role');
+      return await res.json();
+    } catch (err) {
+      console.error(err);
+      throw err;
+    }
+  },
+
+  // 11. Fetch all recruiters
+  getAllRecruiters: async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/recruiters`);
+      if (!res.ok) throw new Error('Failed to fetch recruiters');
+      return await res.json();
+    } catch (err) {
+      console.error(err);
+      return [];
+    }
+  },
+
+  // 12. Add a new recruiter
+  addRecruiter: async (email: string, role: string, requesterEmail: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/recruiters/add`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, role, requesterEmail })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to add recruiter');
+      }
+      return await res.json();
+    } catch (err) {
+      console.error(err);
+      throw err;
+    }
+  },
+
+  // 13. Get recruiter by email
+  getRecruiterByEmail: async (email: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/recruiters/${encodeURIComponent(email)}`);
+      if (!res.ok) throw new Error('Failed to fetch recruiter');
+      return await res.json();
+    } catch (err) {
+      console.error(err);
+      return null;
+    }
   }
 };

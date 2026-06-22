@@ -4,6 +4,7 @@
 
 @layer base {
   body {
-    @apply bg-obsidian text-gray-100 font-sans antialiased;
+    @apply bg-black text-white antialiased;
+    font-family: 'Roboto', sans-serif;
   }
 }
